@@ -43,13 +43,16 @@ log() { printf '\n==> %s\n' "$*"; }
 # Finds a built bundle, e.g. bundle BandTriggerInst VST3 vst3
 bundle() {
     local dir="$BUILD_DIR/$1_artefacts/Release/$2"
-    local found
-    found="$(find "$dir" -maxdepth 1 -name "*.$3" -print -quit 2>/dev/null || true)"
-    if [[ -z "$found" ]]; then
-        echo "error: no .$3 found in $dir (did the Release build finish?)" >&2
-        exit 1
-    fi
-    printf '%s' "$found"
+    local f
+    for f in "$dir"/*."$3"; do
+        if [[ -e "$f" ]]; then
+            printf '%s' "$f"
+            return 0
+        fi
+    done
+    echo "error: no .$3 found in $dir (did the Release build finish?)" >&2
+    ls -la "$BUILD_DIR"/*_artefacts/* >&2 || true
+    exit 1
 }
 
 sign() {
