@@ -45,11 +45,25 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
+      # Reuse the compiled plug-ins when the source code hasn't changed.
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build
+          key: mac-build-${{ hashFiles('CMakeLists.txt', 'Source/**', 'Tests/**') }}
+
       - name: Configure (universal binary, Apple Silicon + Intel)
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build plug-ins
         run: cmake --build build --parallel
+
+      - name: Save build cache
+        uses: actions/cache/save@v4
+        with:
+          path: build
+          key: mac-build-${{ hashFiles('CMakeLists.txt', 'Source/**', 'Tests/**') }}
+        continue-on-error: true
 
       - name: Run detector test
         run: ./build/EngineTest
@@ -70,7 +84,16 @@ jobs:
       - name: Make installer
         run: |
           chmod +x packaging/mac/make_installer.sh
-          ./packaging/mac/make_installer.sh build
+          set +e
+          bash -x ./packaging/mac/make_installer.sh build > installer.log 2>&1
+          status=$?
+          cat installer.log
+          if [[ $status -ne 0 ]]; then
+            # Surface the last lines as an annotation, readable from the run summary.
+            msg=$(tail -n 40 installer.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Installer step failed::${msg}"
+          fi
+          exit $status
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
