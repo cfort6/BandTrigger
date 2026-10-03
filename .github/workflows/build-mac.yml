@@ -68,6 +68,33 @@ jobs:
       - name: Run detector test
         run: ./build/EngineTest
 
+      - name: Validate plug-ins with pluginval
+        continue-on-error: true
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          PV=pluginval.app/Contents/MacOS/pluginval
+          status=0
+          for target in BandTrigger BandTriggerInst; do
+            for p in build/${target}_artefacts/Release/VST3/*.vst3; do
+              codesign --force --deep --sign - "$p"
+              echo "=== $p"
+              set +e
+              "$PV" --strictness-level 5 --validate "$p" > "pv-$target.log" 2>&1
+              rc=$?
+              set -e
+              cat "pv-$target.log"
+              if [[ $rc -ne 0 ]]; then
+                status=1
+                msg=$(grep -E "FAILED|Error|error|!!!|Starting test|Unable|could not|crash" "pv-$target.log" | tail -n 30 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+                echo "::error title=pluginval failed for $target::${msg}"
+              else
+                echo "::notice title=pluginval passed for $target::All tests passed at strictness 5"
+              fi
+            done
+          done
+          exit $status
+
       - name: Import signing certificates (optional)
         if: ${{ env.MAC_CERTS_P12 != '' }}
         run: |
