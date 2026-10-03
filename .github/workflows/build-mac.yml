@@ -1,0 +1,86 @@
+# Builds the Mac installer on GitHub's free Mac machines.
+#
+# Runs on every push and can be started by hand (Actions tab -> "Build Mac
+# installer" -> Run workflow). When it finishes, download the installer from
+# the run's "Artifacts" section. Pushing a tag like v0.1.0 also publishes it on
+# the repository's Releases page.
+
+name: Build Mac installer
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to publish releases for tags
+
+jobs:
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    env:
+      # Optional code signing + notarization. Leave these secrets unset for an
+      # ad-hoc signed installer (macOS will ask you to approve it once).
+      MAC_CERTS_P12: ${{ secrets.MAC_CERTS_P12 }}
+      MAC_CERTS_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+      MAC_APP_SIGN_IDENTITY: ${{ secrets.MAC_APP_SIGN_IDENTITY }}
+      MAC_INSTALLER_SIGN_IDENTITY: ${{ secrets.MAC_INSTALLER_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=0.1.0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure (universal binary, Apple Silicon + Intel)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build plug-ins
+        run: cmake --build build --parallel
+
+      - name: Run detector test
+        run: ./build/EngineTest
+
+      - name: Import signing certificates (optional)
+        if: ${{ env.MAC_CERTS_P12 != '' }}
+        run: |
+          echo "$MAC_CERTS_P12" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certs.p12" -k "$KEYCHAIN" -P "$MAC_CERTS_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+
+      - name: Make installer
+        run: |
+          chmod +x packaging/mac/make_installer.sh
+          ./packaging/mac/make_installer.sh build
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BandTrigger-mac-installer
+          path: dist/*.pkg
+          if-no-files-found: error
+
+      - name: Publish release (tags only)
+        if: ${{ github.ref_type == 'tag' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.pkg
