@@ -83,7 +83,9 @@ component() {
     # update to wherever it finds an older copy with the same bundle ID.
     local i=0
     while /usr/libexec/PlistBuddy -c "Print :$i" "$plist" >/dev/null 2>&1; do
-        /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$plist"
+        # The key isn't always present in pkgbuild's analysis, so replace it.
+        /usr/libexec/PlistBuddy -c "Delete :$i:BundleIsRelocatable" "$plist" >/dev/null 2>&1 || true
+        /usr/libexec/PlistBuddy -c "Add :$i:BundleIsRelocatable bool false" "$plist"
         i=$((i + 1))
     done
 
