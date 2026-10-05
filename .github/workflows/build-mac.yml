@@ -2,13 +2,16 @@
 #
 # Runs on every push and can be started by hand (Actions tab -> "Build Mac
 # installer" -> Run workflow). When it finishes, download the installer from
-# the run's "Artifacts" section. Pushing a tag like v0.2.0 also publishes it on
-# the repository's Releases page.
+# the run's "Artifacts" section. Publishing a release (Releases -> Draft a new
+# release, tag e.g. v0.2.0) builds the installer and attaches it to that release.
 
 name: Build Mac installer
 
 on:
   push:
+    branches: ['**']
+  release:
+    types: [published]   # publishing a release on GitHub attaches the installer to it
   workflow_dispatch:
 
 permissions:
@@ -36,7 +39,7 @@ jobs:
 
       - name: Set version
         run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
             echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
             echo "VERSION=0.2.0" >> "$GITHUB_ENV"
@@ -131,14 +134,15 @@ jobs:
 
       # A copy with a fixed name, so this link always gets the newest release:
       # https://github.com/<owner>/<repo>/releases/latest/download/BandTrigger-mac.pkg
-      - name: Add fixed-name copy for "latest" download links (tags only)
-        if: ${{ github.ref_type == 'tag' }}
+      - name: Add fixed-name copy for "latest" download links (releases only)
+        if: ${{ github.event_name == 'release' }}
         run: cp dist/BandTrigger-*-mac.pkg dist/BandTrigger-mac.pkg
 
-      - name: Publish release (tags only)
-        if: ${{ github.ref_type == 'tag' }}
+      - name: Attach installer to the release (releases only)
+        if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name }}
           name: BandTrigger ${{ env.VERSION }}
           files: dist/*.pkg
           body: |
