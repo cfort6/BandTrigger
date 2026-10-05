@@ -129,8 +129,21 @@ jobs:
           path: dist/*.pkg
           if-no-files-found: error
 
+      # A copy with a fixed name, so this link always gets the newest release:
+      # https://github.com/<owner>/<repo>/releases/latest/download/BandTrigger-mac.pkg
+      - name: Add fixed-name copy for "latest" download links (tags only)
+        if: ${{ github.ref_type == 'tag' }}
+        run: cp dist/BandTrigger-*-mac.pkg dist/BandTrigger-mac.pkg
+
       - name: Publish release (tags only)
         if: ${{ github.ref_type == 'tag' }}
         uses: softprops/action-gh-release@v2
         with:
+          name: BandTrigger ${{ env.VERSION }}
           files: dist/*.pkg
+          body: |
+            8-band drum-hit-to-MIDI trigger for macOS 11+ (Apple Silicon and Intel). VST3, AU and Standalone.
+
+            **Install:** download `BandTrigger-mac.pkg` and double-click it. The installer isn't notarized by Apple yet, so the first time macOS blocks it: open System Settings, then Privacy & Security, scroll down and click **Open Anyway**.
+
+            Setup in Ableton Live and other DAWs: see the README.
