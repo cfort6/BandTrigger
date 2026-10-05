@@ -24,7 +24,7 @@
 set -euo pipefail
 
 BUILD_DIR="${1:-build}"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.0}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT/dist}"

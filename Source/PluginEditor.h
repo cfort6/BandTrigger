@@ -7,6 +7,7 @@
 #include "PluginProcessor.h"
 
 #include <deque>
+#include <functional>
 
 namespace ui
 {
@@ -22,7 +23,18 @@ namespace colours
     const juce::Colour muted    { 0xff8a9099 };
     const juce::Colour spectrum { 0xff9aa3ae };
     const juce::Colour envelope { 0xffc9d0d8 };
-    const juce::Colour accent   { 0xfff2a23a };
+
+    // One colour per band, similar brightness so none dominates.
+    const juce::Colour band[bands::count] = {
+        juce::Colour (0xfff2a23a), // amber
+        juce::Colour (0xff4fb3e8), // sky
+        juce::Colour (0xff6fd08c), // green
+        juce::Colour (0xffe86f9a), // pink
+        juce::Colour (0xffa98bf0), // violet
+        juce::Colour (0xff4fd1c5), // teal
+        juce::Colour (0xfff07a5a), // coral
+        juce::Colour (0xffe8d45a), // yellow
+    };
 }
 
 juce::Font sansFont (float height, bool bold = false);
@@ -39,14 +51,18 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&,
                                bool highlighted, bool down) override;
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return sansFont (13.0f, true); }
+
+    juce::Colour accent = colours::band[0];
 };
 
 //==============================================================================
-// Rotary knob with its value above the name, as in the mockup.
+// Rotary knob with its value above the name. Can be re-pointed at another
+// band's parameter when the selected band changes.
 class Knob : public juce::Component
 {
 public:
-    Knob (juce::AudioProcessorValueTreeState&, const juce::String& paramId, const juce::String& name);
+    explicit Knob (const juce::String& name);
+    void bind (juce::AudioProcessorValueTreeState&, const juce::String& paramId);
     void resized() override;
     void paint (juce::Graphics&) override;
 
@@ -61,25 +77,43 @@ private:
 class Stepper : public juce::Component
 {
 public:
-    Stepper (juce::RangedAudioParameter&, const juce::String& title);
+    explicit Stepper (const juce::String& title);
+    void setParameter (juce::RangedAudioParameter* p) { param = p; repaint(); }
     void resized() override;
     void paint (juce::Graphics&) override;
-    void refresh() { repaint(); }
 
 private:
     void step (int delta);
 
-    juce::RangedAudioParameter& param;
+    juce::RangedAudioParameter* param = nullptr;
     juce::String title;
     juce::TextButton down { juce::String::fromUTF8 ("\xe2\x88\x92") }, up { "+" };
 };
 
 //==============================================================================
-// Log-frequency spectrum with the draggable detection band.
+// One of the 8 band selector buttons along the top. Flashes on each hit.
+class BandButton : public juce::Button
+{
+public:
+    explicit BandButton (int index);
+    void update (const juce::String& name, const juce::String& noteText, bool on, bool selected, float glow);
+    void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+
+private:
+    int index;
+    juce::String name, noteText;
+    bool on = true, selected = false;
+    float glow = 0.0f;
+};
+
+//==============================================================================
+// Log-frequency spectrum showing every band. Click a band's centre line to
+// select it; drag left/right to move the selected band, up/down to widen or
+// narrow it.
 class SpectrumView : public juce::Component
 {
 public:
-    explicit SpectrumView (BandTriggerProcessor&);
+    SpectrumView (BandTriggerProcessor&, std::function<void (int)> onSelectBand);
 
     void setSpectrum (const float* binDb, int numBins, int fftSize, double sampleRate);
     void paint (juce::Graphics&) override;
@@ -93,38 +127,41 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     static constexpr float minHz = 20.0f, maxHz = 20000.0f, minDb = -90.0f, maxDb = 0.0f;
+    static constexpr float pixelsPerOctaveOfWidth = 60.0f; // vertical drag sensitivity
 
 private:
-    enum class Drag { none, centre, low, high };
-
     juce::Rectangle<float> plotArea() const;
     float xForFreq (float hz) const;
     float freqForX (float x) const;
     float yForDb (float db) const;
-    Drag hitTestBand (float x) const;
-    void setParam (const char* id, float value);
+    int bandAtX (float x) const;
+    juce::RangedAudioParameter& param (int band, const char* name) const;
+    void setParam (int band, const char* name, float value);
+    void paintBand (juce::Graphics&, int band, bool selected) const;
 
     BandTriggerProcessor& processor;
-    juce::RangedAudioParameter& freqParam;
-    juce::RangedAudioParameter& widthParam;
+    std::function<void (int)> onSelectBand;
 
     std::vector<float> pixelDb; // smoothed spectrum, one value per pixel column
-    Drag drag = Drag::none;
-    float dragStartCentre = 60.0f, dragStartFreq = 60.0f;
+
+    bool dragging = false;
+    int dragBand = 0;
+    juce::Point<float> dragStart;
+    float dragStartFreq = 60.0f, dragStartWidth = 1.0f;
 };
 
 //==============================================================================
-// Scrolling band envelope with threshold line and hit markers.
+// Scrolling envelope of the selected band, with threshold and hit markers.
 class EnvelopeView : public juce::Component
 {
 public:
     explicit EnvelopeView (BandTriggerProcessor&);
-    void addPoints (const BandTriggerProcessor::EnvPoint* pts, int num);
+    void addFrames (const BandTriggerProcessor::EnvFrame* frames, int num);
     void paint (juce::Graphics&) override;
 
 private:
     BandTriggerProcessor& processor;
-    std::deque<BandTriggerProcessor::EnvPoint> points;
+    std::deque<BandTriggerProcessor::EnvFrame> frames;
 };
 
 } // namespace ui
@@ -139,26 +176,43 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    void selectBand (int band);
+
 private:
     void timerCallback() override;
+    void bindSelectedBand();
+    void updateBandButtons();
     void updateSpectrum();
     void finishLearn (const std::array<float, BandTriggerProcessor::learnSize>& capture);
 
     BandTriggerProcessor& owner;
     ui::BandTriggerLookAndFeel lnf;
+    int shownBand = -1;
 
     // header
-    juce::TextEditor nameEditor;
     juce::TextButton soloButton { "Solo band" }, bypassButton { "Bypass" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> soloAttachment, bypassAttachment;
+
+    // band selector row
+    juce::OwnedArray<ui::BandButton> bandButtons;
+    std::array<float, bands::count> glow {};
+    std::array<int, bands::count> lastHitCounts {};
 
     // main
     ui::SpectrumView spectrum;
     ui::EnvelopeView envelope;
-    ui::Stepper noteStepper, channelStepper;
+
+    // selected band panel
+    juce::TextEditor nameEditor;
+    juce::TextButton onButton { "Band on" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> onAttachment;
+    ui::Stepper noteStepper { "Note" };
     juce::TextButton learnButton { "Learn from hit" };
 
-    // knobs
+    // global MIDI
+    ui::Stepper channelStepper { "Channel (all bands)" };
+
+    // knobs: 5 per-band + lookahead (global)
     juce::OwnedArray<ui::Knob> knobs;
 
     // spectrum analysis
@@ -171,10 +225,7 @@ private:
     std::vector<float> binDb = std::vector<float> ((size_t) fftSize / 2, -120.0f);
     std::vector<float> readScratch = std::vector<float> ((size_t) BandTriggerProcessor::spectrumFifoSize);
 
-    // hit light
-    int lastHitCount = 0;
-    float hitGlow = 0.0f;
-    juce::Rectangle<int> hitCard, midiCard, spectrumCard, envelopeCard, knobCard, lightArea;
+    juce::Rectangle<int> bandRow, spectrumCard, envelopeCard, bandCard, midiCard, knobCard;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BandTriggerEditor)
 };

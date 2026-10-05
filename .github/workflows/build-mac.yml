@@ -2,7 +2,7 @@
 #
 # Runs on every push and can be started by hand (Actions tab -> "Build Mac
 # installer" -> Run workflow). When it finishes, download the installer from
-# the run's "Artifacts" section. Pushing a tag like v0.1.0 also publishes it on
+# the run's "Artifacts" section. Pushing a tag like v0.2.0 also publishes it on
 # the repository's Releases page.
 
 name: Build Mac installer
@@ -39,7 +39,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            echo "VERSION=0.1.0" >> "$GITHUB_ENV"
+            echo "VERSION=0.2.0" >> "$GITHUB_ENV"
           fi
 
       - name: Install Ninja

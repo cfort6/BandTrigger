@@ -1,8 +1,9 @@
 # BandTrigger
 
-Listens to a drum track, watches one frequency band for hits, and sends a MIDI
-note for each hit. Use one instance per drum (kick, snare, hats, toms…) and
-point the MIDI at a Drum Rack or any sampler.
+Listens to a drum track and turns hits into MIDI notes. It has **8 bands**.
+Each band watches its own frequency range and sends its own note, so one
+instance can trigger a whole kit (kick, snare, hats, toms, crash) into one
+Drum Rack.
 
 ![BandTrigger](docs/screenshot.png)
 
@@ -10,8 +11,8 @@ The project builds **two plug-ins from the same code**:
 
 | Plug-in | Where it goes | Use it in |
 |---|---|---|
-| **BandTrigger** | Audio effect, inserted on the drum audio track | Reaper, Bitwig, Cubase, Studio One, FL Studio |
-| **BandTrigger Instrument** | Instrument on a MIDI track; the drum track feeds it through its sidechain input | Ableton Live |
+| **BandTrigger** | Audio effect, inserted on the drum audio track | Ableton Live, Reaper, Bitwig, Cubase, Studio One, FL Studio |
+| **BandTrigger Instrument** | Instrument on a MIDI track; the drum track feeds it through its sidechain input | Hosts that only take plug-in MIDI from instrument tracks |
 
 Formats: VST3 and Standalone on Mac and Windows, plus AU on Mac.
 
@@ -38,7 +39,7 @@ happens in your web browser.
      `.github/workflows/build-mac.yml` (open it in TextEdit), and commit.
 5. When it shows a green check, click the run and download
    **BandTrigger-mac-installer** under **Artifacts**. Unzip it to get
-   `BandTrigger-0.1.0-mac.pkg`.
+   `BandTrigger-0.2.0-mac.pkg`.
 6. Double-click the .pkg. The first time, macOS will say it can't verify the
    developer, because the installer isn't signed with a paid Apple Developer
    ID. Click **Done**, open **System Settings → Privacy & Security**, scroll
@@ -106,30 +107,25 @@ and timing. It needs no JUCE and no DAW.
 
 ## Setting up in Ableton Live
 
-Live takes MIDI from plug-ins that sit on **MIDI tracks**, so use
-**BandTrigger Instrument**:
+1. Put **BandTrigger** on your drum audio track.
+2. Create a MIDI track with your **Drum Rack**. Set its **MIDI From** to the
+   drum track, choose **BandTrigger** in the second dropdown, and set Monitor
+   to **In**.
+3. Turn on and dial in the bands you need (below). Each band plays its own
+   Drum Rack pad.
 
-1. Keep your drum loop on its audio track (call it "Drums").
-2. Create a MIDI track and load **BandTrigger Instrument** on it.
-3. In the device's title bar, open the **Sidechain** section and set
-   Audio From to the "Drums" track. Set the track's Monitor to **In** so it
-   keeps processing.
-4. Create another MIDI track with your **Drum Rack**. Set its **MIDI From** to
-   the BandTrigger track, choose **BandTrigger Instrument** in the second
-   dropdown, and set Monitor to **In**.
-5. Dial in the band (below). Each hit now plays the Drum Rack.
+Use **one BandTrigger per drum track**. A Live MIDI track can only listen to
+one plug-in instance, which is why all 8 bands live in one instance.
 
-For more drums, repeat steps 2 to 4: one BandTrigger track per drum, each
-feeding its own Drum Rack track. To get everything into one clip, record each
-Drum Rack track's MIDI, then drag the clips together onto one track.
+The **Instrument** version also works in Live: load it on a MIDI track, open
+the device's **Sidechain** section and pick the drum track, then point the
+Drum Rack track's MIDI From at it, the same way as above.
 
 Notes:
 - Live merges MIDI channels when routing between tracks, so the Channel
-  setting doesn't matter in Live. The **Note** does: 36 (C1) is the first Drum
-  Rack pad, 38 (D1) is a typical snare, 42 (F#1) a closed hat.
-- Worth a quick check: if your version of Live lists the *audio track* as a
-  MIDI source when the effect version is on it, you can use plain
-  **BandTrigger** directly on the drum track instead, which is simpler.
+  setting doesn't matter in Live. The **Note** does. The bands start on the
+  General MIDI drum notes that Drum Racks use: Kick 36 (C1), Snare 38 (D1),
+  Closed Hat 42 (F#1), Open Hat 46 (A#1), Low/Mid/High Tom 45/47/50, Crash 49.
 
 ## Other DAWs
 
@@ -150,17 +146,36 @@ that needs a separate MIDI FX version with a sidechain.
 
 ## Dialing it in
 
-1. **Find the drum.** Click *Learn from hit* and play (or loop) a section
-   where the drum hits. It captures the next strong transient and centres the
-   band on its loudest frequency. Or drag the band yourself.
-2. **Listen.** *Solo band* lets you hear only what the detector hears.
-3. **Set the threshold.** Watch *Band envelope*. Each drum hit should poke
-   above the dashed line, and bleed from other drums should stay under it.
-   The triangles show the notes that were sent.
+Kick, Snare and Closed Hat start switched on; the other five bands start off.
+
+**Picking a band.** Click one of the 8 band buttons along the top, or click a
+band's center line in the spectrum. The selected band is drawn at full
+strength and the others dim. The knobs, Note and *Band on* switch always
+belong to the selected band.
+
+**Moving a band.** Click anywhere in the spectrum and drag:
+- **left / right** moves the selected band's center frequency
+- **up / down** widens / narrows it (up = wider)
+- hold **Shift** for fine adjustment; double-click jumps the center to that spot;
+  the scroll wheel also changes the width
+
+For each drum:
+
+1. **Find it.** Select a band, click *Learn from hit*, and play (or loop) a
+   section where the drum hits. It centers the band on the loudest frequency
+   of the next strong hit and switches the band on. Or drag it there yourself.
+2. **Listen.** *Solo band* lets you hear only what the selected band's detector hears.
+3. **Set the threshold.** Watch *Band envelope*. Each hit of that drum should
+   poke above the dashed line, and bleed from other drums should stay under it.
+   The triangles show the notes that were sent, and the band's button flashes
+   on every hit.
+
+Bands can overlap. Each one is detected independently, so a snare band and a
+hat band can both fire on the same moment if both drums hit.
 
 Good starting bands:
 
-| Drum | Centre | Width | Why |
+| Drum | Center | Width | Why |
 |---|---|---|---|
 | Kick | 50–80 Hz | 1–1.5 oct | Below everything else |
 | Snare | 1–3 kHz | 1 oct | The crack. The body (150–250 Hz) overlaps the kick's attack. |
@@ -169,21 +184,32 @@ Good starting bands:
 
 ## Controls
 
+Per band (for the selected band):
+
 | Control | What it does |
 |---|---|
-| **Frequency / Width** | Centre and width (in octaves) of the band-pass filter. 24 dB/octave slopes on both sides. Also set by dragging in the spectrum. |
+| **Band on** | Whether the band sends notes. Switched-off bands keep analyzing, so their envelope is ready when you turn them on. |
+| **Frequency / Width** | Center and width (in octaves) of the band-pass filter. 24 dB/octave slopes on both sides. |
 | **Threshold** | Band level a hit must exceed. The hit must fall 3 dB below it before another hit can trigger. |
 | **Retrigger** | Minimum time between notes, which stops flams and ringing from double-triggering. |
-| **Sensitivity** | 0% = every note at velocity 127. 100% = full dynamics: velocity follows how far the hit peaks above the threshold (30 dB range). |
+| **Sensitivity** | 0% = every note at velocity 127. 100% = full dynamics: velocity follows how far the hit peaks above the threshold (30 dB range). If soft hits seem to go missing, try lower sensitivity: they may be arriving at a low velocity. |
+| **Note** | The MIDI note the band sends. |
+| **Name** | A label for the band, shown on its button and in the spectrum. Saved with the project. |
+
+Global:
+
+| Control | What it does |
+|---|---|
 | **Lookahead** | Delays the audio by this much and reports it to the DAW as latency, so the DAW lines the MIDI up exactly with the hit. 15 ms is enough for kick bands. Set 0 for live playing (notes will be a few ms late, more for low bands). |
-| **Note / Channel** | The MIDI note and channel sent. |
-| **Solo band** | Outputs only the filtered band. |
+| **Channel** | MIDI channel for all bands. |
+| **Solo band** | Outputs only the selected band's filtered signal. |
 | **Bypass** | Passes the audio through and sends no notes. |
-| **Name** | A label so you can tell instances apart. Saved with the project. |
 
 ## How it works
 
 `Source/TriggerEngine.h` has the whole detector, with no JUCE dependency:
+
+Each of the 8 bands runs its own copy of the engine on the same input:
 
 1. The audio is summed to mono and band-passed (two 2nd-order high-passes and
    two 2nd-order low-passes, i.e. Linkwitz-Riley slopes on each side).
@@ -208,9 +234,8 @@ Source/PluginEditor     spectrum, envelope view, knobs, steppers, learn
 Tests/EngineTest.cpp    detector test on a synthetic drum loop
 ```
 
-## Ideas for version 2
+## Ideas for later
 
-- **Multi-band:** several bands in one instance, one MIDI output. In Ableton
-  that means a single trigger track feeding a single Drum Rack.
 - A timing offset knob, and a "learn" that also suggests the threshold.
+- Per-band "choke" groups (an open hat cut off by the closed hat).
 - A Logic MIDI FX version.

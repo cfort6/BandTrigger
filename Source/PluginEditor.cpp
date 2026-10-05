@@ -20,15 +20,15 @@ BandTriggerLookAndFeel::BandTriggerLookAndFeel()
 {
     setColour (ResizableWindow::backgroundColourId, colours::ground);
     setColour (TextButton::buttonColourId, colours::control);
-    setColour (TextButton::buttonOnColourId, colours::accent);
+    setColour (TextButton::buttonOnColourId, accent);
     setColour (TextButton::textColourOffId, colours::text);
     setColour (TextButton::textColourOnId, colours::ground);
     setColour (TextEditor::backgroundColourId, Colour (0xff1d2024));
     setColour (TextEditor::outlineColourId, colours::track);
-    setColour (TextEditor::focusedOutlineColourId, colours::accent);
+    setColour (TextEditor::focusedOutlineColourId, accent);
     setColour (TextEditor::textColourId, colours::text);
-    setColour (TextEditor::highlightColourId, colours::accent.withAlpha (0.35f));
-    setColour (CaretComponent::caretColourId, colours::accent);
+    setColour (TextEditor::highlightColourId, accent.withAlpha (0.35f));
+    setColour (CaretComponent::caretColourId, accent);
     setColour (Label::textColourId, colours::text);
 }
 
@@ -52,7 +52,7 @@ void BandTriggerLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w,
     {
         Path value;
         value.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
-        g.setColour (colours::accent);
+        g.setColour (accent);
         g.strokePath (value, stroke);
     }
 
@@ -75,13 +75,12 @@ void BandTriggerLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const
 
     g.setColour (fill);
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (b.getToggleState() ? colours::accent : colours::track);
+    g.setColour (b.getToggleState() ? accent : colours::track);
     g.drawRoundedRectangle (r, 6.0f, 1.0f);
 }
 
 //==============================================================================
-Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const String& displayName)
-    : name (displayName)
+Knob::Knob (const String& displayName) : name (displayName)
 {
     slider.setSliderStyle (Slider::RotaryHorizontalVerticalDrag);
     slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
@@ -89,11 +88,15 @@ Knob::Knob (AudioProcessorValueTreeState& state, const String& paramId, const St
     slider.setTitle (displayName);
     slider.onValueChange = [this] { repaint(); };
     addAndMakeVisible (slider);
+}
 
+void Knob::bind (AudioProcessorValueTreeState& state, const String& paramId)
+{
+    attachment.reset();
     attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (state, paramId, slider);
-
     if (auto* p = state.getParameter (paramId))
         slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
+    repaint();
 }
 
 void Knob::resized()
@@ -114,7 +117,7 @@ void Knob::paint (Graphics& g)
 }
 
 //==============================================================================
-Stepper::Stepper (RangedAudioParameter& p, const String& t) : param (p), title (t)
+Stepper::Stepper (const String& t) : title (t)
 {
     down.setTitle (title + " down");
     up.setTitle (title + " up");
@@ -126,12 +129,14 @@ Stepper::Stepper (RangedAudioParameter& p, const String& t) : param (p), title (
 
 void Stepper::step (int delta)
 {
-    const auto range = param.getNormalisableRange();
-    const float current = param.convertFrom0to1 (param.getValue());
+    if (param == nullptr)
+        return;
+    const auto range = param->getNormalisableRange();
+    const float current = param->convertFrom0to1 (param->getValue());
     const float next = jlimit (range.start, range.end, std::round (current) + (float) delta);
-    param.beginChangeGesture();
-    param.setValueNotifyingHost (param.convertTo0to1 (next));
-    param.endChangeGesture();
+    param->beginChangeGesture();
+    param->setValueNotifyingHost (param->convertTo0to1 (next));
+    param->endChangeGesture();
     repaint();
 }
 
@@ -149,18 +154,88 @@ void Stepper::paint (Graphics& g)
     g.setColour (colours::muted);
     g.setFont (sansFont (12.0f));
     g.drawText (title, r.removeFromTop (22), Justification::topLeft);
-    g.setColour (colours::text);
-    g.setFont (monoFont (18.0f, true));
-    g.drawText (param.getCurrentValueAsText(), r.withHeight (44).reduced (44, 0), Justification::centred);
+    if (param != nullptr)
+    {
+        g.setColour (colours::text);
+        g.setFont (monoFont (18.0f, true));
+        g.drawText (param->getCurrentValueAsText(), r.withHeight (44).reduced (44, 0), Justification::centred);
+    }
 }
 
 //==============================================================================
-SpectrumView::SpectrumView (BandTriggerProcessor& p)
-    : processor (p),
-      freqParam (*p.apvts.getParameter (ParamID::freq)),
-      widthParam (*p.apvts.getParameter (ParamID::width))
+BandButton::BandButton (int i) : Button ("Band " + String (i + 1)), index (i)
 {
-    setTitle ("Spectrum and detection band");
+    setTitle ("Select band " + String (i + 1));
+}
+
+void BandButton::update (const String& n, const String& note, bool bandOn, bool isSelected, float g)
+{
+    if (n != name || note != noteText || bandOn != on || isSelected != selected || std::abs (g - glow) > 0.01f)
+    {
+        name = n;
+        noteText = note;
+        on = bandOn;
+        selected = isSelected;
+        glow = g;
+        setTitle ("Band " + String (index + 1) + ": " + name + (on ? "" : " (off)"));
+        repaint();
+    }
+}
+
+void BandButton::paintButton (Graphics& g, bool highlighted, bool down)
+{
+    const auto col = colours::band[index];
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+
+    auto fill = selected ? colours::control : colours::card;
+    if (down) fill = fill.brighter (0.12f);
+    else if (highlighted) fill = fill.brighter (0.06f);
+    g.setColour (fill);
+    g.fillRoundedRectangle (r, 6.0f);
+
+    if (glow > 0.0f)
+    {
+        g.setColour (col.withAlpha (0.35f * glow));
+        g.fillRoundedRectangle (r, 6.0f);
+    }
+
+    // colour tab along the top
+    g.setColour (col.withAlpha (on ? 1.0f : 0.3f));
+    g.fillRoundedRectangle (r.withHeight (4.0f).reduced (8.0f, 0.0f).translated (0.0f, 4.0f), 2.0f);
+
+    g.setColour (selected ? col : colours::cardEdge);
+    g.drawRoundedRectangle (r, 6.0f, selected ? 2.0f : 1.0f);
+
+    auto area = getLocalBounds().reduced (10, 0).withTrimmedTop (12);
+    g.setColour (on ? colours::text : colours::muted);
+    g.setFont (sansFont (13.0f, true));
+    g.drawFittedText (name, area.removeFromTop (18), Justification::centredLeft, 1, 0.8f);
+
+    auto bottom = area.removeFromTop (16);
+    g.setColour (colours::muted);
+    g.setFont (monoFont (11.0f));
+    g.drawText (noteText, bottom, Justification::centredLeft);
+    if (! on)
+        g.drawText ("OFF", bottom, Justification::centredRight);
+}
+
+//==============================================================================
+SpectrumView::SpectrumView (BandTriggerProcessor& p, std::function<void (int)> onSelect)
+    : processor (p), onSelectBand (std::move (onSelect))
+{
+    setTitle ("Spectrum and detection bands");
+    setMouseCursor (MouseCursor::UpDownLeftRightResizeCursor);
+}
+
+RangedAudioParameter& SpectrumView::param (int band, const char* name) const
+{
+    return *processor.apvts.getParameter (bands::id (band, name));
+}
+
+void SpectrumView::setParam (int band, const char* name, float value)
+{
+    auto& p = param (band, name);
+    p.setValueNotifyingHost (p.convertTo0to1 (value));
 }
 
 Rectangle<float> SpectrumView::plotArea() const
@@ -228,10 +303,80 @@ void SpectrumView::setSpectrum (const float* bins, int numBins, int fftSize, dou
     repaint();
 }
 
-void SpectrumView::paint (Graphics& g)
+void SpectrumView::paintBand (Graphics& g, int b, bool selected) const
 {
     const auto a = plotArea();
     const double sr = processor.getCurrentSampleRate();
+    const bool on = processor.isBandOn (b);
+    const auto col = colours::band[b];
+
+    const float centre = processor.getBandValue (b, bands::freq);
+    const float width  = processor.getBandValue (b, bands::width);
+    double lo, hi;
+    bt::bandEdges (centre, width, lo, hi);
+    const float xLo = xForFreq ((float) lo), xHi = xForFreq ((float) hi), xC = xForFreq (centre);
+
+    // Selected band at full strength; the others recede. A switched-off band
+    // is only drawn while it's selected.
+    const float strength = (selected ? 1.0f : 0.32f) * (on ? 1.0f : 0.55f);
+
+    g.setColour (col.withAlpha ((selected ? 0.16f : 0.07f) * (on ? 1.0f : 0.6f)));
+    g.fillRect (Rectangle<float>::leftTopRightBottom (xLo, a.getY(), xHi, a.getBottom()));
+
+    g.setColour (col.withAlpha (strength * (selected ? 1.0f : 0.8f)));
+    const float edgeW = selected ? 1.5f : 1.0f;
+    g.drawLine (xLo, a.getY(), xLo, a.getBottom(), edgeW);
+    g.drawLine (xHi, a.getY(), xHi, a.getBottom(), edgeW);
+
+    // actual filter response, on the same dB scale
+    bt::BandPass bp;
+    bp.set (sr, lo, hi);
+    Path response;
+    bool started = false;
+    for (float x = a.getX(); x <= a.getRight(); x += 2.0f)
+    {
+        const float hz = freqForX (x);
+        if (hz >= sr * 0.5) break;
+        const float y = yForDb (bt::gainToDb ((float) bp.magnitudeAt (sr, hz)));
+        if (! started) { response.startNewSubPath (x, y); started = true; }
+        else response.lineTo (x, y);
+    }
+    if (selected)
+    {
+        Path dashed;
+        const float dashes[] = { 4.0f, 4.0f };
+        PathStrokeType (1.5f).createDashedStroke (dashed, response, dashes, 2);
+        g.fillPath (dashed);
+    }
+    else
+    {
+        g.strokePath (response, PathStrokeType (1.0f));
+    }
+
+    // centre line: click it to select the band
+    g.setColour (col.withAlpha (selected ? 1.0f : strength * 1.4f));
+    g.drawLine (xC, a.getY(), xC, a.getBottom(), selected ? 2.5f : 1.5f);
+
+    // name tag at the top of the centre line
+    const String label = processor.getBandName (b) + (on ? "" : " (off)");
+    g.setFont (sansFont (12.0f, selected));
+    g.setColour (col.withAlpha (selected ? 1.0f : jmin (1.0f, strength * 2.2f)));
+    g.drawText (label, Rectangle<float> (xC + 5.0f, a.getY() + 3.0f + (float) (b % 3) * 14.0f, 120.0f, 14.0f),
+                Justification::centredLeft);
+
+    if (selected)
+    {
+        const float hy = yForDb (-6.0f);
+        g.setColour (col);
+        g.fillEllipse (xC - 7.0f, hy - 7.0f, 14.0f, 14.0f);
+        g.setColour (colours::ground);
+        g.drawEllipse (xC - 7.0f, hy - 7.0f, 14.0f, 14.0f, 2.0f);
+    }
+}
+
+void SpectrumView::paint (Graphics& g)
+{
+    const auto a = plotArea();
 
     // grid
     g.setColour (colours::grid);
@@ -243,7 +388,6 @@ void SpectrumView::paint (Graphics& g)
     for (float hz : gridHz)
         g.drawVerticalLine ((int) xForFreq (hz), a.getY(), a.getBottom());
 
-    // labels
     g.setColour (colours::muted);
     g.setFont (monoFont (11.0f));
     for (int i = 0; i < 10; ++i)
@@ -278,159 +422,151 @@ void SpectrumView::paint (Graphics& g)
         g.strokePath (line, PathStrokeType (1.5f, PathStrokeType::curved));
     }
 
-    // detection band
-    const float centre = freqParam.convertFrom0to1 (freqParam.getValue());
-    const float width  = widthParam.convertFrom0to1 (widthParam.getValue());
-    double lo, hi;
-    bt::bandEdges (centre, width, lo, hi);
-    const float xLo = xForFreq ((float) lo), xHi = xForFreq ((float) hi), xC = xForFreq (centre);
-
+    // bands: others first (dimmed), selected on top
     g.saveState();
     g.reduceClipRegion (a.toNearestInt());
-
-    g.setColour (colours::accent.withAlpha (0.16f));
-    g.fillRect (Rectangle<float>::leftTopRightBottom (xLo, a.getY(), xHi, a.getBottom()));
-    g.setColour (colours::accent);
-    g.drawLine (xLo, a.getY(), xLo, a.getBottom(), 2.0f);
-    g.drawLine (xHi, a.getY(), xHi, a.getBottom(), 2.0f);
-
-    // actual filter response, on the same dB scale
-    bt::BandPass bp;
-    bp.set (sr, lo, hi);
-    Path response;
-    bool started = false;
-    for (float x = a.getX(); x <= a.getRight(); x += 2.0f)
-    {
-        const float hz = freqForX (x);
-        if (hz >= sr * 0.5) break;
-        const float y = yForDb (bt::gainToDb ((float) bp.magnitudeAt (sr, hz)));
-        if (! started) { response.startNewSubPath (x, y); started = true; }
-        else response.lineTo (x, y);
-    }
-    Path dashed;
-    const float dashes[] = { 4.0f, 4.0f };
-    PathStrokeType (1.5f).createDashedStroke (dashed, response, dashes, 2);
-    g.fillPath (dashed);
-
-    // handles
-    const float midY = a.getCentreY();
-    g.setColour (colours::accent);
-    g.fillEllipse (xC - 7.0f, yForDb (-6.0f) - 7.0f, 14.0f, 14.0f);
-    g.setColour (colours::ground);
-    g.drawEllipse (xC - 7.0f, yForDb (-6.0f) - 7.0f, 14.0f, 14.0f, 2.0f);
-    for (float x : { xLo, xHi })
-    {
-        g.setColour (colours::ground);
-        g.fillEllipse (x - 5.0f, midY - 5.0f, 10.0f, 10.0f);
-        g.setColour (colours::accent);
-        g.drawEllipse (x - 5.0f, midY - 5.0f, 10.0f, 10.0f, 2.0f);
-    }
+    const int sel = processor.getSelectedBand();
+    for (int b = 0; b < bands::count; ++b)
+        if (b != sel && processor.isBandOn (b))
+            paintBand (g, b, false);
+    paintBand (g, sel, true);
     g.restoreState();
 }
 
-SpectrumView::Drag SpectrumView::hitTestBand (float x) const
+int SpectrumView::bandAtX (float x) const
 {
-    const float centre = freqParam.convertFrom0to1 (freqParam.getValue());
-    const float width  = widthParam.convertFrom0to1 (widthParam.getValue());
-    double lo, hi;
-    bt::bandEdges (centre, width, lo, hi);
-    if (std::abs (x - xForFreq ((float) lo)) < 8.0f) return Drag::low;
-    if (std::abs (x - xForFreq ((float) hi)) < 8.0f) return Drag::high;
-    return Drag::centre;
-}
-
-void SpectrumView::setParam (const char* id, float value)
-{
-    auto* p = processor.apvts.getParameter (id);
-    p->setValueNotifyingHost (p->convertTo0to1 (value));
+    // Nearest centre line within reach. Ties go to the selected band so you
+    // can still grab it where bands overlap.
+    constexpr float reach = 10.0f;
+    const int sel = processor.getSelectedBand();
+    int best = -1;
+    float bestDist = reach;
+    for (int b = 0; b < bands::count; ++b)
+    {
+        if (b != sel && ! processor.isBandOn (b))
+            continue;
+        const float d = std::abs (x - xForFreq (processor.getBandValue (b, bands::freq))) - (b == sel ? 0.5f : 0.0f);
+        if (d < bestDist)
+        {
+            bestDist = d;
+            best = b;
+        }
+    }
+    return best;
 }
 
 void SpectrumView::mouseMove (const MouseEvent& e)
 {
-    setMouseCursor (hitTestBand ((float) e.x) == Drag::centre ? MouseCursor::DraggingHandCursor
-                                                               : MouseCursor::LeftRightResizeCursor);
+    setMouseCursor (bandAtX (e.position.x) >= 0 ? MouseCursor::PointingHandCursor
+                                                 : MouseCursor::UpDownLeftRightResizeCursor);
 }
 
 void SpectrumView::mouseDown (const MouseEvent& e)
 {
-    drag = hitTestBand ((float) e.x);
-    dragStartCentre = freqParam.convertFrom0to1 (freqParam.getValue());
-    dragStartFreq = freqForX ((float) e.x);
-    (drag == Drag::centre ? freqParam : widthParam).beginChangeGesture();
+    const int hit = bandAtX (e.position.x);
+    const int sel = processor.getSelectedBand();
+    dragBand = hit >= 0 ? hit : sel;
+    if (dragBand != sel && onSelectBand)
+        onSelectBand (dragBand);
+
+    dragStart = e.position;
+    dragStartFreq = processor.getBandValue (dragBand, bands::freq);
+    dragStartWidth = processor.getBandValue (dragBand, bands::width);
+    param (dragBand, bands::freq).beginChangeGesture();
+    param (dragBand, bands::width).beginChangeGesture();
+    dragging = true;
+    setMouseCursor (MouseCursor::UpDownLeftRightResizeCursor);
 }
 
 void SpectrumView::mouseDrag (const MouseEvent& e)
 {
-    const float f = freqForX ((float) e.x);
-    if (drag == Drag::centre)
-    {
-        // Move relative to where you grabbed, so the band doesn't jump.
-        setParam (ParamID::freq, jlimit (minHz, maxHz, dragStartCentre * f / dragStartFreq));
-    }
-    else if (drag != Drag::none)
-    {
-        // Drag an edge: centre stays put, width follows the mouse.
-        const float centre = freqParam.convertFrom0to1 (freqParam.getValue());
-        setParam (ParamID::width, jlimit (0.1f, 4.0f, 2.0f * std::abs (std::log2 (f / centre))));
-    }
+    if (! dragging)
+        return;
+
+    // Shift = fine adjustment. A small dead zone on each axis stops a
+    // sideways drag from also nudging the width, and vice versa.
+    const float fine = e.mods.isShiftDown() ? 0.25f : 1.0f;
+    constexpr float deadZone = 3.0f;
+    auto beyond = [] (float d) { return std::abs (d) <= deadZone ? 0.0f : d - std::copysign (deadZone, d); };
+
+    const float dx = beyond (e.position.x - dragStart.x);
+    const float dy = beyond (e.position.y - dragStart.y);
+
+    // left/right: move the centre, in octaves matching the axis under the mouse
+    const float octavesPerPixel = std::log2 (maxHz / minHz) / plotArea().getWidth();
+    setParam (dragBand, bands::freq, jlimit (minHz, maxHz, dragStartFreq * std::pow (2.0f, dx * octavesPerPixel * fine)));
+
+    // up = wider, down = narrower
+    setParam (dragBand, bands::width, jlimit (0.1f, 4.0f, dragStartWidth - dy / pixelsPerOctaveOfWidth * fine));
 }
 
-void SpectrumView::mouseUp (const MouseEvent&)
+void SpectrumView::mouseUp (const MouseEvent& e)
 {
-    if (drag != Drag::none)
-        (drag == Drag::centre ? freqParam : widthParam).endChangeGesture();
-    drag = Drag::none;
+    if (dragging)
+    {
+        param (dragBand, bands::freq).endChangeGesture();
+        param (dragBand, bands::width).endChangeGesture();
+    }
+    dragging = false;
+    mouseMove (e);
 }
 
 void SpectrumView::mouseDoubleClick (const MouseEvent& e)
 {
-    freqParam.beginChangeGesture();
-    setParam (ParamID::freq, freqForX ((float) e.x));
-    freqParam.endChangeGesture();
+    // Jump the selected band's centre to where you double-clicked.
+    const int sel = processor.getSelectedBand();
+    auto& p = param (sel, bands::freq);
+    p.beginChangeGesture();
+    setParam (sel, bands::freq, freqForX (e.position.x));
+    p.endChangeGesture();
 }
 
 void SpectrumView::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& wheel)
 {
-    const float width = widthParam.convertFrom0to1 (widthParam.getValue());
+    const int sel = processor.getSelectedBand();
+    const float width = processor.getBandValue (sel, bands::width);
     const float delta = (wheel.isReversed ? -wheel.deltaY : wheel.deltaY) * 1.5f;
-    widthParam.beginChangeGesture();
-    setParam (ParamID::width, jlimit (0.1f, 4.0f, width + delta));
-    widthParam.endChangeGesture();
+    auto& p = param (sel, bands::width);
+    p.beginChangeGesture();
+    setParam (sel, bands::width, jlimit (0.1f, 4.0f, width + delta));
+    p.endChangeGesture();
 }
 
 //==============================================================================
 EnvelopeView::EnvelopeView (BandTriggerProcessor& p) : processor (p)
 {
-    setTitle ("Band envelope");
+    setTitle ("Selected band envelope");
 }
 
-void EnvelopeView::addPoints (const BandTriggerProcessor::EnvPoint* pts, int num)
+void EnvelopeView::addFrames (const BandTriggerProcessor::EnvFrame* f, int num)
 {
     for (int i = 0; i < num; ++i)
-        points.push_back (pts[i]);
-    const size_t maxPoints = (size_t) jmax (1, getWidth() - 36);
-    while (points.size() > maxPoints)
-        points.pop_front();
+        frames.push_back (f[i]);
+    const size_t maxFrames = (size_t) jmax (1, getWidth() - 36);
+    while (frames.size() > maxFrames)
+        frames.pop_front();
     repaint();
 }
 
 void EnvelopeView::paint (Graphics& g)
 {
+    const int sel = processor.getSelectedBand();
+    const auto col = colours::band[sel];
     const auto a = getLocalBounds().toFloat().withTrimmedLeft (36.0f).withTrimmedTop (12.0f);
     auto yFor = [&a] (float db) { return jmap (jlimit (-60.0f, 0.0f, db), 0.0f, -60.0f, a.getY(), a.getBottom() - 2.0f); };
 
     g.setColour (colours::grid);
     g.drawHorizontalLine ((int) a.getBottom() - 1, a.getX(), a.getRight());
 
-    const float thresh = processor.apvts.getRawParameterValue (ParamID::threshold)->load();
+    const float thresh = processor.getBandValue (sel, bands::thresh);
     const float ty = yFor (thresh);
 
-    // trace, newest point at the right edge
+    // trace, newest frame at the right edge
     Path trace;
-    const float x0 = a.getRight() - (float) points.size();
-    for (size_t i = 0; i < points.size(); ++i)
+    const float x0 = a.getRight() - (float) frames.size();
+    for (size_t i = 0; i < frames.size(); ++i)
     {
-        const float x = x0 + (float) i, y = yFor (points[i].db);
+        const float x = x0 + (float) i, y = yFor (frames[i].db[(size_t) sel]);
         if (i == 0) trace.startNewSubPath (x, y); else trace.lineTo (x, y);
     }
     g.setColour (colours::envelope);
@@ -442,15 +578,16 @@ void EnvelopeView::paint (Graphics& g)
     tl.lineTo (a.getRight(), ty);
     const float dashes[] = { 5.0f, 4.0f };
     PathStrokeType (1.5f).createDashedStroke (dashed, tl, dashes, 2);
-    g.setColour (colours::accent);
+    g.setColour (col);
     g.fillPath (dashed);
     g.setFont (monoFont (10.0f));
     g.drawText (String (roundToInt (thresh)), Rectangle<float> (0.0f, ty - 7.0f, 30.0f, 14.0f), Justification::centredRight);
 
-    // hit markers
-    for (size_t i = 0; i < points.size(); ++i)
+    // hit markers for this band
+    const auto bit = (uint8_t) (1u << sel);
+    for (size_t i = 0; i < frames.size(); ++i)
     {
-        if (! points[i].hit) continue;
+        if ((frames[i].hits & bit) == 0) continue;
         const float x = x0 + (float) i;
         Path tri;
         tri.addTriangle (x - 6.0f, 0.0f, x + 6.0f, 0.0f, x, 8.0f);
@@ -464,47 +601,56 @@ void EnvelopeView::paint (Graphics& g)
 BandTriggerEditor::BandTriggerEditor (BandTriggerProcessor& p)
     : AudioProcessorEditor (&p),
       owner (p),
-      spectrum (p),
-      envelope (p),
-      noteStepper (*p.apvts.getParameter (ParamID::note), "Note"),
-      channelStepper (*p.apvts.getParameter (ParamID::channel), "Channel")
+      spectrum (p, [this] (int b) { selectBand (b); }),
+      envelope (p)
 {
     setLookAndFeel (&lnf);
 
-    nameEditor.setFont (ui::sansFont (15.0f));
-    nameEditor.setIndents (12, 9);
-    nameEditor.setText (owner.getInstanceName(), false);
-    nameEditor.setTitle ("Instance name");
-    nameEditor.onTextChange = [this] { owner.setInstanceName (nameEditor.getText()); };
-    nameEditor.onReturnKey = [] { Component::unfocusAllComponents(); };
-    addAndMakeVisible (nameEditor);
-
     soloButton.setClickingTogglesState (true);
     bypassButton.setClickingTogglesState (true);
+    soloButton.setTooltip ("Hear only what the selected band's detector hears");
     soloAttachment   = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (owner.apvts, ParamID::solo, soloButton);
     bypassAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (owner.apvts, ParamID::bypass, bypassButton);
     addAndMakeVisible (soloButton);
     addAndMakeVisible (bypassButton);
 
+    for (int b = 0; b < bands::count; ++b)
+    {
+        auto* button = bandButtons.add (new ui::BandButton (b));
+        button->onClick = [this, b] { selectBand (b); };
+        addAndMakeVisible (button);
+        lastHitCounts[(size_t) b] = owner.hitCounters[b].load();
+    }
+
     addAndMakeVisible (spectrum);
     addAndMakeVisible (envelope);
+
+    nameEditor.setFont (ui::sansFont (15.0f));
+    nameEditor.setIndents (12, 9);
+    nameEditor.setTitle ("Band name");
+    nameEditor.onTextChange = [this] {
+        if (shownBand >= 0)
+            owner.setBandName (shownBand, nameEditor.getText());
+    };
+    nameEditor.onReturnKey = [] { Component::unfocusAllComponents(); };
+    addAndMakeVisible (nameEditor);
+
+    onButton.setClickingTogglesState (true);
+    addAndMakeVisible (onButton);
     addAndMakeVisible (noteStepper);
-    addAndMakeVisible (channelStepper);
 
     learnButton.onClick = [this] { owner.armLearn(); };
     addAndMakeVisible (learnButton);
 
-    knobs.add (new ui::Knob (owner.apvts, ParamID::freq, "Frequency"));
-    knobs.add (new ui::Knob (owner.apvts, ParamID::width, "Width"));
-    knobs.add (new ui::Knob (owner.apvts, ParamID::threshold, "Threshold"));
-    knobs.add (new ui::Knob (owner.apvts, ParamID::retrigger, "Retrigger"));
-    knobs.add (new ui::Knob (owner.apvts, ParamID::sensitivity, "Sensitivity"));
-    knobs.add (new ui::Knob (owner.apvts, ParamID::lookahead, "Lookahead"));
-    for (auto* k : knobs)
-        addAndMakeVisible (k);
+    channelStepper.setParameter (owner.apvts.getParameter (ParamID::channel));
+    addAndMakeVisible (channelStepper);
 
-    lastHitCount = owner.hitCounter.load();
-    setSize (980, 700);
+    for (auto* name : { "Frequency", "Width", "Threshold", "Retrigger", "Sensitivity", "Lookahead" })
+        addAndMakeVisible (knobs.add (new ui::Knob (name)));
+    knobs[5]->bind (owner.apvts, ParamID::lookahead);
+
+    bindSelectedBand();
+    setSize (980, 748);
     startTimerHz (30);
 }
 
@@ -515,29 +661,88 @@ BandTriggerEditor::~BandTriggerEditor()
 }
 
 //==============================================================================
+void BandTriggerEditor::selectBand (int band)
+{
+    owner.setSelectedBand (band);
+    bindSelectedBand();
+}
+
+void BandTriggerEditor::bindSelectedBand()
+{
+    const int sel = owner.getSelectedBand();
+    shownBand = sel;
+
+    const auto col = ui::colours::band[sel];
+    lnf.accent = col;
+    lnf.setColour (TextButton::buttonOnColourId, col);
+    lnf.setColour (TextEditor::focusedOutlineColourId, col);
+    lnf.setColour (TextEditor::highlightColourId, col.withAlpha (0.35f));
+    lnf.setColour (CaretComponent::caretColourId, col);
+
+    const char* perBand[] = { bands::freq, bands::width, bands::thresh, bands::retrig, bands::sens };
+    for (int i = 0; i < 5; ++i)
+        knobs[i]->bind (owner.apvts, bands::id (sel, perBand[i]));
+
+    onAttachment.reset();
+    onAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (owner.apvts, bands::id (sel, bands::on), onButton);
+    noteStepper.setParameter (owner.apvts.getParameter (bands::id (sel, bands::note)));
+    nameEditor.setText (owner.getBandName (sel), false);
+
+    updateBandButtons();
+    repaint();
+    for (auto* c : getChildren())
+        c->repaint();
+}
+
+void BandTriggerEditor::updateBandButtons()
+{
+    for (int b = 0; b < bands::count; ++b)
+    {
+        auto* noteParam = owner.apvts.getParameter (bands::id (b, bands::note));
+        bandButtons[b]->update (owner.getBandName (b), noteParam->getCurrentValueAsText(), owner.isBandOn (b),
+                                b == shownBand, glow[(size_t) b]);
+    }
+}
+
+//==============================================================================
 void BandTriggerEditor::resized()
 {
-    nameEditor.setBounds (452, 24, 150, 36);
-    bypassButton.setBounds (getWidth() - 20 - 90, 24, 90, 36);
-    soloButton.setBounds (bypassButton.getX() - 8 - 104, 24, 104, 36);
+    bypassButton.setBounds (getWidth() - 20 - 90, 20, 90, 36);
+    soloButton.setBounds (bypassButton.getX() - 8 - 104, 20, 104, 36);
 
-    spectrumCard = { 20, 78, 720, 310 };
-    envelopeCard = { 20, 402, 720, 144 };
-    hitCard      = { 754, 78, 206, 150 };
-    midiCard     = { 754, 242, 206, 304 };
-    knobCard     = { 20, 560, 940, 120 };
+    bandRow      = { 20, 70, 940, 52 };
+    spectrumCard = { 20, 136, 720, 304 };
+    envelopeCard = { 20, 454, 720, 140 };
+    bandCard     = { 754, 136, 206, 314 };
+    midiCard     = { 754, 464, 206, 130 };
+    knobCard     = { 20, 608, 940, 120 };
 
-    spectrum.setBounds (spectrumCard.getX() + 14, spectrumCard.getY() + 38, 692, 238);
+    {
+        auto row = bandRow;
+        const int gap = 8;
+        const int w = (row.getWidth() - gap * (bands::count - 1)) / bands::count;
+        for (auto* b : bandButtons)
+        {
+            b->setBounds (row.removeFromLeft (w));
+            row.removeFromLeft (gap);
+        }
+    }
+
+    spectrum.setBounds (spectrumCard.getX() + 14, spectrumCard.getY() + 38, 692, 232);
     envelope.setBounds (envelopeCard.getX() + 14, envelopeCard.getY() + 36, 692, 94);
 
-    lightArea = hitCard.withSizeKeepingCentre (72, 72).translated (0, 2);
+    auto c = bandCard.reduced (16);
+    c.removeFromTop (26);
+    nameEditor.setBounds (c.removeFromTop (36));
+    c.removeFromTop (10);
+    onButton.setBounds (c.removeFromTop (36));
+    c.removeFromTop (12);
+    noteStepper.setBounds (c.removeFromTop (66));
+    learnButton.setBounds (c.removeFromBottom (40));
 
     auto m = midiCard.reduced (16);
     m.removeFromTop (26);
-    noteStepper.setBounds (m.removeFromTop (70));
-    m.removeFromTop (10);
-    channelStepper.setBounds (m.removeFromTop (70));
-    learnButton.setBounds (m.removeFromBottom (40));
+    channelStepper.setBounds (m.removeFromTop (66));
 
     auto k = knobCard.reduced (18, 12);
     const int kw = k.getWidth() / knobs.size();
@@ -545,7 +750,7 @@ void BandTriggerEditor::resized()
         knob->setBounds (k.removeFromLeft (kw));
 }
 
-static void drawCard (Graphics& g, Rectangle<int> r, const String& title)
+static void drawCard (Graphics& g, Rectangle<int> r, const String& title, Colour titleColour = ui::colours::muted)
 {
     g.setColour (ui::colours::card);
     g.fillRoundedRectangle (r.toFloat(), 10.0f);
@@ -553,7 +758,7 @@ static void drawCard (Graphics& g, Rectangle<int> r, const String& title)
     g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 10.0f, 1.0f);
     if (title.isNotEmpty())
     {
-        g.setColour (ui::colours::muted);
+        g.setColour (titleColour);
         g.setFont (ui::sansFont (12.0f, true));
         g.drawText (title, r.reduced (14).removeFromTop (16), Justification::centredLeft);
     }
@@ -562,61 +767,54 @@ static void drawCard (Graphics& g, Rectangle<int> r, const String& title)
 void BandTriggerEditor::paint (Graphics& g)
 {
     using namespace ui;
+    const int sel = jmax (0, shownBand);
+    const auto col = colours::band[sel];
     g.fillAll (colours::ground);
 
     // header
     g.setColour (colours::text);
     g.setFont (monoFont (20.0f, true));
-    g.drawText ("BANDTRIGGER", 20, 24, 170, 36, Justification::centredLeft);
+    g.drawText ("BANDTRIGGER", 20, 20, 170, 36, Justification::centredLeft);
     g.setColour (colours::muted);
     g.setFont (sansFont (13.0f));
-    g.drawText (BandTriggerProcessor::isInstrument ? String::fromUTF8 ("instrument \xc2\xb7 sidechain \xe2\x86\x92 MIDI")
-                                                   : String::fromUTF8 ("single band \xc2\xb7 audio in \xe2\x86\x92 MIDI out"),
-                190, 24, 220, 36, Justification::centredLeft);
-    g.setFont (sansFont (12.0f));
-    g.drawText ("NAME", 404, 24, 44, 36, Justification::centredRight);
+    g.drawText (BandTriggerProcessor::isInstrument ? String::fromUTF8 ("8 bands \xc2\xb7 sidechain \xe2\x86\x92 MIDI")
+                                                   : String::fromUTF8 ("8 bands \xc2\xb7 audio in \xe2\x86\x92 MIDI out"),
+                190, 20, 260, 36, Justification::centredLeft);
 
     // spectrum card
     drawCard (g, spectrumCard, "SPECTRUM");
     {
-        auto& fp = *owner.apvts.getParameter (ParamID::freq);
-        auto& wp = *owner.apvts.getParameter (ParamID::width);
-        const float c = fp.convertFrom0to1 (fp.getValue()), w = wp.convertFrom0to1 (wp.getValue());
+        auto& fp = *owner.apvts.getParameter (bands::id (sel, bands::freq));
+        const float c = owner.getBandValue (sel, bands::freq), w = owner.getBandValue (sel, bands::width);
         double lo, hi;
         bt::bandEdges (c, w, lo, hi);
         auto fmt = [&fp] (double hz) { return fp.getText (fp.convertTo0to1 ((float) hz), 0); };
-        g.setColour (colours::accent);
+        g.setColour (col);
         g.setFont (monoFont (13.0f));
-        g.drawText (fmt (lo) + String::fromUTF8 (" \xe2\x80\x93 ") + fmt (hi) + String::fromUTF8 (" \xc2\xb7 center ") + fmt (c),
+        g.drawText (owner.getBandName (sel) + String::fromUTF8 (" \xc2\xb7 ") + fmt (lo) + String::fromUTF8 (" \xe2\x80\x93 ")
+                        + fmt (hi) + String::fromUTF8 (" \xc2\xb7 center ") + fmt (c),
                     spectrumCard.reduced (14).removeFromTop (16), Justification::centredRight);
     }
     g.setColour (colours::muted);
     g.setFont (sansFont (12.0f));
-    g.drawText (String::fromUTF8 ("Drag the band to move it \xc2\xb7 drag an edge or scroll to change width \xc2\xb7 double-click to jump"),
+    g.drawText (String::fromUTF8 ("Click a center line to pick a band \xc2\xb7 drag \xe2\x86\x94 frequency \xc2\xb7 drag \xe2\x86\x95 width (up = wider) \xc2\xb7 Shift = fine"),
                 spectrumCard.reduced (14).removeFromBottom (16), Justification::centredLeft);
 
     // envelope card
     drawCard (g, envelopeCard, "BAND ENVELOPE");
     g.setColour (colours::muted);
     g.setFont (sansFont (12.0f));
-    g.drawText ("markers = MIDI notes sent", envelopeCard.reduced (14).removeFromTop (16), Justification::centredRight);
+    g.drawText (owner.getBandName (sel) + String::fromUTF8 (" \xc2\xb7 markers = MIDI notes sent"),
+                envelopeCard.reduced (14).removeFromTop (16), Justification::centredRight);
 
-    // hit card
-    drawCard (g, hitCard, "HIT");
+    // selected band card
+    drawCard (g, bandCard, "BAND " + String (sel + 1), col);
     {
-        const auto l = lightArea.toFloat();
-        for (int i = 4; i >= 1; --i)
-        {
-            g.setColour (colours::accent.withAlpha (0.06f * hitGlow));
-            g.fillEllipse (l.expanded ((float) i * 6.0f));
-        }
-        g.setColour (colours::track.interpolatedWith (colours::accent, 0.15f + 0.85f * hitGlow));
-        g.fillEllipse (l);
+        const int vel = owner.lastVelocities[sel].load();
         g.setColour (colours::muted);
-        g.setFont (monoFont (13.0f));
-        const int vel = owner.lastVelocity.load();
-        g.drawText (vel > 0 ? "vel " + String (vel) : String ("waiting"),
-                    hitCard.withTop (lightArea.getBottom() + 6).withHeight (20), Justification::centred);
+        g.setFont (monoFont (12.0f));
+        g.drawText (vel > 0 ? "last vel " + String (vel) : String ("no hits yet"),
+                    bandCard.reduced (14).removeFromTop (16), Justification::centredRight);
     }
 
     drawCard (g, midiCard, "MIDI OUT");
@@ -628,25 +826,32 @@ void BandTriggerEditor::timerCallback()
 {
     updateSpectrum();
 
-    BandTriggerProcessor::EnvPoint pts[512];
+    BandTriggerProcessor::EnvFrame frames[512];
     int n;
-    while ((n = owner.readEnvelopePoints (pts, 512)) > 0)
-        envelope.addPoints (pts, n);
+    while ((n = owner.readEnvelopeFrames (frames, 512)) > 0)
+        envelope.addFrames (frames, n);
 
-    const int hits = owner.hitCounter.load();
-    const float previousGlow = hitGlow;
-    if (hits != lastHitCount)
+    for (int b = 0; b < bands::count; ++b)
     {
-        lastHitCount = hits;
-        hitGlow = 1.0f;
+        const int hits = owner.hitCounters[b].load();
+        auto& gl = glow[(size_t) b];
+        if (hits != lastHitCounts[(size_t) b])
+        {
+            lastHitCounts[(size_t) b] = hits;
+            gl = 1.0f;
+        }
+        else
+        {
+            gl *= 0.8f;
+            if (gl < 0.02f) gl = 0.0f;
+        }
     }
+
+    // follow selection changes made elsewhere (preset load, state restore)
+    if (owner.getSelectedBand() != shownBand)
+        bindSelectedBand();
     else
-    {
-        hitGlow *= 0.8f;
-        if (hitGlow < 0.01f) hitGlow = 0.0f;
-    }
-    if (std::abs (hitGlow - previousGlow) > 1.0e-4f)
-        repaint (hitCard);
+        updateBandButtons();
 
     const bool listening = owner.isLearnArmed();
     learnButton.setButtonText (listening ? String::fromUTF8 ("Listening\xe2\x80\xa6 hit a drum") : String ("Learn from hit"));
@@ -656,13 +861,14 @@ void BandTriggerEditor::timerCallback()
     if (owner.takeLearnCapture (capture))
         finishLearn (capture);
 
-    noteStepper.refresh();
-    channelStepper.refresh();
+    noteStepper.repaint();
+    channelStepper.repaint();
     repaint (spectrumCard.withHeight (34));
+    repaint (bandCard.withHeight (34));
 
     // keep the name in sync if the host loads a preset
-    if (! nameEditor.hasKeyboardFocus (true) && nameEditor.getText() != owner.getInstanceName())
-        nameEditor.setText (owner.getInstanceName(), false);
+    if (! nameEditor.hasKeyboardFocus (true) && nameEditor.getText() != owner.getBandName (shownBand))
+        nameEditor.setText (owner.getBandName (shownBand), false);
 }
 
 void BandTriggerEditor::updateSpectrum()
@@ -691,7 +897,8 @@ void BandTriggerEditor::updateSpectrum()
 
 void BandTriggerEditor::finishLearn (const std::array<float, BandTriggerProcessor::learnSize>& capture)
 {
-    // Zero-padded FFT of the captured hit; the loudest bin sets the band centre.
+    // Zero-padded FFT of the captured hit; the loudest bin sets the selected
+    // band's centre, and switches the band on.
     constexpr int n = BandTriggerProcessor::learnSize;
     dsp::WindowingFunction<float> learnWindow ((size_t) n, dsp::WindowingFunction<float>::hann, false);
     std::fill (fftData.begin(), fftData.end(), 0.0f);
@@ -708,8 +915,17 @@ void BandTriggerEditor::finishLearn (const std::array<float, BandTriggerProcesso
         if (fftData[(size_t) i] > fftData[(size_t) best])
             best = i;
 
-    auto* fp = owner.apvts.getParameter (ParamID::freq);
+    const int sel = owner.getSelectedBand();
+    auto* fp = owner.apvts.getParameter (bands::id (sel, bands::freq));
     fp->beginChangeGesture();
     fp->setValueNotifyingHost (fp->convertTo0to1 ((float) (best * binHz)));
     fp->endChangeGesture();
+
+    auto* on = owner.apvts.getParameter (bands::id (sel, bands::on));
+    if (on->getValue() < 0.5f)
+    {
+        on->beginChangeGesture();
+        on->setValueNotifyingHost (1.0f);
+        on->endChangeGesture();
+    }
 }

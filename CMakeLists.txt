@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(BandTrigger VERSION 0.1.0)
+project(BandTrigger VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -68,7 +68,8 @@ function(bandtrigger_add_plugin target product code is_synth categories au_type)
     target_compile_definitions(${target} PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
-        JUCE_VST3_CAN_REPLACE_VST2=0)
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0)  # the MIDI input is unused; don't add 2,080 hidden CC parameters
 
     target_link_libraries(${target}
         PRIVATE

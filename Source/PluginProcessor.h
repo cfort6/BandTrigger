@@ -6,18 +6,50 @@
 #include <array>
 #include <atomic>
 
+//==============================================================================
+// Eight detection bands. Each band has its own filter, detector and MIDI note,
+// so one instance can trigger a whole kit into one Drum Rack.
+namespace bands
+{
+    constexpr int count = 8;
+
+    struct Preset
+    {
+        const char* name;
+        float freq, width, threshold;
+        int note;      // General MIDI drum map (Ableton: 36 = C1)
+        bool on;
+    };
+
+    inline constexpr Preset presets[count] = {
+        { "Kick",       60.0f,    1.2f, -18.0f, 36, true  },
+        { "Snare",      2000.0f,  1.0f, -30.0f, 38, true  },
+        { "Closed Hat", 10000.0f, 1.5f, -30.0f, 42, true  },
+        { "Open Hat",   7000.0f,  1.2f, -30.0f, 46, false },
+        { "Low Tom",    90.0f,    0.6f, -24.0f, 45, false },
+        { "Mid Tom",    140.0f,   0.6f, -24.0f, 47, false },
+        { "High Tom",   200.0f,   0.6f, -24.0f, 50, false },
+        { "Crash",      5000.0f,  1.5f, -30.0f, 49, false },
+    };
+
+    // Per-band parameter IDs: "b1_freq", "b2_note", ...
+    inline juce::String id (int band, const char* param) { return "b" + juce::String (band + 1) + "_" + param; }
+
+    inline constexpr const char* on     = "on";
+    inline constexpr const char* freq   = "freq";
+    inline constexpr const char* width  = "width";
+    inline constexpr const char* thresh = "thresh";
+    inline constexpr const char* retrig = "retrig";
+    inline constexpr const char* sens   = "sens";
+    inline constexpr const char* note   = "note";
+}
+
 namespace ParamID
 {
-    inline constexpr const char* freq        = "freq";
-    inline constexpr const char* width       = "width";
-    inline constexpr const char* threshold   = "threshold";
-    inline constexpr const char* retrigger   = "retrigger";
-    inline constexpr const char* sensitivity = "sensitivity";
-    inline constexpr const char* lookahead   = "lookahead";
-    inline constexpr const char* note        = "note";
-    inline constexpr const char* channel     = "channel";
-    inline constexpr const char* solo        = "solo";
-    inline constexpr const char* bypass      = "bypass";
+    inline constexpr const char* lookahead = "lookahead";
+    inline constexpr const char* channel   = "channel";
+    inline constexpr const char* solo      = "solo";
+    inline constexpr const char* bypass    = "bypass";
 }
 
 //==============================================================================
@@ -54,8 +86,8 @@ public:
 
     juce::AudioProcessorParameter* getBypassParameter() const override;
 
-    // Instrument build: tell VST3 hosts the only input is a sidechain (aux)
-    // bus, so Ableton etc. show a sidechain selector for it.
+    // Instrument build: tell VST3 hosts the only audio input is a sidechain
+    // (aux) bus, so Ableton etc. show a sidechain selector for it.
     struct Vst3Extensions : juce::VST3ClientExtensions
     {
         bool getPluginHasMainInput() const override { return ! isInstrument; }
@@ -73,54 +105,73 @@ public:
 
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
 
+    // The band being edited. Also the one "Solo band" listens to.
+    int getSelectedBand() const noexcept { return selectedBand.load(); }
+    void setSelectedBand (int band);
+
+    juce::String getBandName (int band) const;
+    void setBandName (int band, const juce::String& name);
+
+    float getBandValue (int band, const char* param) const;
+    bool isBandOn (int band) const { return getBandValue (band, bands::on) > 0.5f; }
+
     // Raw input audio (mono) for the spectrum display.
     static constexpr int spectrumFifoSize = 16384;
     int readSpectrumSamples (float* dest, int maxNum);
 
-    // Band envelope history: one point every ~4 ms.
-    struct EnvPoint { float db; bool hit; };
+    // Envelope history for every band: one frame every ~4 ms.
+    struct EnvFrame
+    {
+        std::array<float, bands::count> db;
+        uint8_t hits; // bit n set = band n sent a note in this frame
+    };
     static constexpr int envFifoSize = 4096;
-    int readEnvelopePoints (EnvPoint* dest, int maxNum);
+    int readEnvelopeFrames (EnvFrame* dest, int maxNum);
 
-    std::atomic<int> hitCounter { 0 };
-    std::atomic<int> lastVelocity { 0 };
+    std::atomic<int> hitCounters[bands::count] {};
+    std::atomic<int> lastVelocities[bands::count] {};
 
     // "Learn from hit": arm, the next strong broadband transient is captured
-    // and the editor picks the band from its spectrum.
+    // and the editor moves the selected band to its loudest frequency.
     static constexpr int learnSize = 2048;
     void armLearn() noexcept { learnReady.store (false); learnArmed.store (true); }
     bool isLearnArmed() const noexcept { return learnArmed.load(); }
     bool takeLearnCapture (std::array<float, learnSize>& dest);
 
-    juce::String getInstanceName() const;
-    void setInstanceName (const juce::String& name);
-
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    static BusesProperties makeBuses();
 
     void pushSpectrum (const float* data, int num);
-    void pushEnvPoint (EnvPoint p);
+    void pushEnvFrame (const EnvFrame& f);
     void processLearn (float mono);
 
-    std::atomic<float>* freqParam = nullptr;
-    std::atomic<float>* widthParam = nullptr;
-    std::atomic<float>* thresholdParam = nullptr;
-    std::atomic<float>* retriggerParam = nullptr;
-    std::atomic<float>* sensitivityParam = nullptr;
+    struct BandParams
+    {
+        std::atomic<float>* on = nullptr;
+        std::atomic<float>* freq = nullptr;
+        std::atomic<float>* width = nullptr;
+        std::atomic<float>* thresh = nullptr;
+        std::atomic<float>* retrig = nullptr;
+        std::atomic<float>* sens = nullptr;
+        std::atomic<float>* note = nullptr;
+    };
+    std::array<BandParams, bands::count> bandParams;
+
     std::atomic<float>* lookaheadParam = nullptr;
-    std::atomic<float>* noteParam = nullptr;
     std::atomic<float>* channelParam = nullptr;
     std::atomic<float>* soloParam = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
 
     Vst3Extensions vst3Extensions;
-    static BusesProperties makeBuses();
 
-    bt::TriggerEngine engine;
+    std::array<bt::TriggerEngine, bands::count> engines;
+    std::array<int, bands::count> lastSeenHits {};
     std::array<bt::DelayLine, 2> audioDelays;
     bt::DelayLine soloDelay;
     static constexpr double maxLookaheadMs = 30.0;
 
+    std::atomic<int> selectedBand { 0 };
     std::atomic<double> currentSampleRate { 44100.0 };
     int64_t sampleClock = 0;
     int currentLatency = -1;
@@ -133,11 +184,9 @@ private:
 
     // envelope FIFO
     juce::AbstractFifo envFifo { envFifoSize };
-    std::vector<EnvPoint> envData = std::vector<EnvPoint> ((size_t) envFifoSize);
+    std::vector<EnvFrame> envData = std::vector<EnvFrame> ((size_t) envFifoSize);
     int envChunkSize = 176, envChunkCount = 0;
-    float envChunkMax = -120.0f;
-    bool envChunkHit = false;
-    int lastSeenHits = 0;
+    EnvFrame envChunk {};
 
     // learn
     std::atomic<bool> learnArmed { false }, learnReady { false };
