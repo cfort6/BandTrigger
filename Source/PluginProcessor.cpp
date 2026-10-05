@@ -139,6 +139,10 @@ void BandTriggerProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // The instrument has a MIDI input only because Live requires one. Drop
+    // anything arriving on it so only the trigger notes go out.
+    midi.clear();
+
     const int numIn  = getTotalNumInputChannels();
     const int numOut = getTotalNumOutputChannels();
     const int numSamples = buffer.getNumSamples();

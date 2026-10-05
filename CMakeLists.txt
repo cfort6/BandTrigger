@@ -53,7 +53,7 @@ function(bandtrigger_add_plugin target product code is_synth categories au_type)
         PRODUCT_NAME                "${product}"
         FORMATS                     ${BT_FORMATS}
         IS_SYNTH                    ${is_synth}
-        NEEDS_MIDI_INPUT            FALSE
+        NEEDS_MIDI_INPUT            ${is_synth}   # Live won't open an instrument without a MIDI input
         NEEDS_MIDI_OUTPUT           TRUE          # sends the trigger notes
         IS_MIDI_EFFECT              FALSE
         EDITOR_WANTS_KEYBOARD_FOCUS TRUE          # for the name field
