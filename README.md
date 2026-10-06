@@ -239,3 +239,14 @@ Tests/EngineTest.cpp    detector test on a synthetic drum loop
 - A timing offset knob, and a "learn" that also suggests the threshold.
 - Per-band "choke" groups (an open hat cut off by the closed hat).
 - A Logic MIDI FX version.
+
+## License
+
+BandTrigger is free software under the **GNU Affero General Public License
+v3.0** (AGPLv3); the full text is in [LICENSE](LICENSE). You can use, share
+and change it, including in your own music, commercial or not. If you
+distribute a modified version, you must share its source code under the same
+license.
+
+BandTrigger is built with [JUCE](https://juce.com), which it uses under JUCE's
+AGPLv3 option.
